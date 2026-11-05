@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/jupiter847/jupiter847/main/assets/profile-art.png?v=jupiter" width="100%" alt="An original wireframe Jupiter planetary scanner, with exploded optical rings and orbital construction lines on black.">
+<img src="https://raw.githubusercontent.com/jupiter847/jupiter847/main/assets/orbital-header.svg" width="100%" alt="A minimal Jupiter-inspired orbital header with fine curves on a dark background.">
 
 <h1 align="center">Janina</h1>
 
