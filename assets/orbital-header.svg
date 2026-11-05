@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="160" viewBox="0 0 1280 160" role="img" aria-labelledby="title desc">
+  <title id="title">Jupiter orbital header</title>
+  <desc id="desc">A quiet dark strip with three fine orbital curves and two small tracking marks at the right edge.</desc>
+  <rect width="1280" height="160" fill="#0d1117"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M750 152C932 132 1119 53 1280 4" stroke="#303b47" stroke-width=".8"/>
+    <path d="M900 160C980 47 1167 38 1280 119" stroke="#7d8995" stroke-width=".8"/>
+    <path d="M942 160C1023 93 1174 94 1268 160" stroke="#26313b" stroke-width=".7"/>
+  </g>
+  <circle cx="1163.5" cy="67.8" r="1.7" fill="#c1c9d1"/>
+  <path d="M1059 114h7m-3.5-3.5v7" fill="none" stroke="#52606d" stroke-width=".7"/>
+</svg>
