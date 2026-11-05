@@ -1,6 +1,6 @@
 <img src="https://raw.githubusercontent.com/jupiter847/jupiter847/main/assets/profile-art.png" width="100%" alt="A monochrome Gothic portal dissolving into fractured polygons, point-cloud fragments and vertical scan lines.">
 
-<h1 align="center">Janina Kildišytė</h1>
+<h1 align="center">Janina</h1>
 
 <p align="center"><b>UI / UX DESIGN &nbsp; · &nbsp; VISUAL DESIGN &nbsp; · &nbsp; INTERACTION</b></p>
 
