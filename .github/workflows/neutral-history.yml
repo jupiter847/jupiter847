@@ -1,0 +1,260 @@
+# MANUAL DRAFT: do not upload or run before action-time approval.
+name: Update neutral project history
+
+on:
+  workflow_dispatch:
+
+# Repository-local token; every omitted permission is disabled.
+permissions:
+  contents: write
+
+concurrency:
+  group: neutral-history-main
+  cancel-in-progress: false
+
+jobs:
+  update-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare and verify the reviewed message-only rewrite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          """Prepare a message-only rewrite locally. No network or remote mutations.
+          
+          Only --review-ref is updated. The checked source ref, trees, identities, dates,
+          and commit ordering are verified unchanged. Plans are exact full-message maps.
+          """
+          
+          import argparse
+          import json
+          import re
+          import subprocess
+          from pathlib import Path
+          
+          SIGNATURE_KEYS = {b"gpgsig", b"gpgsig-sha256", b"mergetag"}
+          SHA = re.compile(r"[0-9a-f]{40}\Z")
+          
+          
+          def require(condition, message):
+              if not condition:
+                  raise RuntimeError(message)
+          
+          
+          def run_git(repo, *arguments, data=None):
+              result = subprocess.run(
+                  ["git", "--git-dir", str(repo), *arguments], input=data,
+                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+              )
+              if result.returncode:
+                  raise RuntimeError("git " + arguments[0] + " failed: " + result.stderr.decode("utf-8", "replace"))
+              return result.stdout
+          
+          
+          def parse_commit(raw):
+              require(b"\n\n" in raw, "Missing commit header boundary")
+              header, message = raw.split(b"\n\n", 1)
+              blocks = []
+              for line in header.split(b"\n"):
+                  if line.startswith(b" "):
+                      require(bool(blocks), "Orphan continuation header")
+                      blocks[-1] += b"\n" + line
+                  else:
+                      blocks.append(line)
+              return blocks, message
+          
+          
+          def header_key(block):
+              return block.split(b" ", 1)[0]
+          
+          
+          def header_values(blocks, key):
+              return [block.split(b" ", 1)[1] for block in blocks if header_key(block) == key]
+          
+          
+          def prepare(repo, plan, expected_head, source_ref, review_ref, carrier=False):
+              require(SHA.fullmatch(expected_head), "Invalid expected source head")
+              require(SHA.fullmatch(plan["expected_head"]), "Invalid plan base head")
+              require(plan["repository"] in {"jupiter847/lumi-gradient-studio", "jupiter847/jupiter847"}, "Unapproved repository")
+              require(review_ref.startswith("refs/review/") and ".." not in review_ref, "Use a local refs/review/ ref")
+              require(source_ref != review_ref, "Source and review refs must differ")
+              git = lambda *args, data=None: run_git(repo, *args, data=data)
+              source_before = git("rev-parse", source_ref).decode().strip()
+              require(source_before == expected_head, "Source head changed; refresh the review before continuing")
+              source_blocks, _ = parse_commit(git("cat-file", "commit", expected_head))
+              if carrier:
+                  parents = header_values(source_blocks, b"parent")
+                  require(parents == [plan["expected_head"].encode("ascii")], "Workflow carrier parent differs from the reviewed base")
+                  changed_paths = git("diff-tree", "--no-commit-id", "--name-only", "-r", plan["expected_head"], expected_head).decode().splitlines()
+                  require(changed_paths == [".github/workflows/neutral-history.yml"], "Carrier must change only the reviewed manual workflow")
+              else:
+                  require(plan["expected_head"] == expected_head, "Plan does not match the source head")
+              order = git("rev-list", "--reverse", "--topo-order", expected_head).decode().splitlines()
+              require(order, "Empty history")
+              reachable = set(order)
+              entries = plan["messages"]
+              require(len({entry["old_sha"] for entry in entries}) == len(entries), "Duplicate plan entries")
+              require(all(SHA.fullmatch(entry["old_sha"]) and entry["old_sha"] in reachable for entry in entries), "Plan includes an unreachable commit")
+              by_sha = {entry["old_sha"]: entry for entry in entries}
+              mapping = {}
+              review = []
+              for old_sha in order:
+                  old_raw = git("cat-file", "commit", old_sha)
+                  old_blocks, old_message = parse_commit(old_raw)
+                  item = by_sha.get(old_sha)
+                  if item:
+                      require(old_message == item["old_message"].encode("utf-8"), "Full original message mismatch at " + old_sha)
+                      new_message = item["new_message"].encode("utf-8")
+                      require(new_message.strip() and b"\x00" not in new_message, "Invalid replacement message")
+                  else:
+                      new_message = old_message
+                  replaced_blocks = []
+                  for block in old_blocks:
+                      if header_key(block) == b"parent":
+                          parent = block.split(b" ", 1)[1].decode("ascii")
+                          require(parent in mapping, "Parent not processed before child")
+                          replaced_blocks.append(b"parent " + mapping[parent].encode("ascii"))
+                      else:
+                          replaced_blocks.append(block)
+                  changed = replaced_blocks != old_blocks or new_message != old_message
+                  removed = []
+                  if changed:
+                      removed = [header_key(block).decode("ascii") for block in replaced_blocks if header_key(block) in SIGNATURE_KEYS]
+                      replaced_blocks = [block for block in replaced_blocks if header_key(block) not in SIGNATURE_KEYS]
+                      new_raw = b"\n".join(replaced_blocks) + b"\n\n" + new_message
+                      new_sha = git("hash-object", "-t", "commit", "-w", "--stdin", data=new_raw).decode().strip()
+                  else:
+                      new_raw = old_raw
+                      new_sha = old_sha
+                  mapping[old_sha] = new_sha
+                  checked_raw = git("cat-file", "commit", new_sha)
+                  checked_blocks, checked_message = parse_commit(checked_raw)
+                  require(checked_raw == new_raw, "Written commit differs from prepared bytes")
+                  for field in (b"tree", b"author", b"committer"):
+                      require(header_values(checked_blocks, field) == header_values(old_blocks, field), "Preserved field changed: " + field.decode())
+                  expected_parents = [mapping[p.decode("ascii")].encode("ascii") for p in header_values(old_blocks, b"parent")]
+                  require(header_values(checked_blocks, b"parent") == expected_parents, "Ordered parent mapping changed")
+                  if changed:
+                      retained_old = [block for block in old_blocks if header_key(block) not in SIGNATURE_KEYS | {b"parent"}]
+                      retained_new = [block for block in checked_blocks if header_key(block) != b"parent"]
+                      require(retained_old == retained_new, "Non-signature metadata changed")
+                  require(checked_message == new_message, "Replacement message changed")
+                  review.append({
+                      "old_sha": old_sha, "new_sha": new_sha,
+                      "old_message": old_message.decode("utf-8"),
+                      "new_message": new_message.decode("utf-8"),
+                      "message_changed": old_message != new_message,
+                      "tree": header_values(old_blocks, b"tree")[0].decode("ascii"),
+                      "removed_signature_headers": removed,
+                  })
+              new_head = mapping[expected_head]
+              new_order = git("rev-list", "--reverse", "--topo-order", new_head).decode().splitlines()
+              require(new_order == [mapping[sha] for sha in order], "History topology or commit count changed")
+              require(git("rev-parse", expected_head + "^{tree}") == git("rev-parse", new_head + "^{tree}"), "Final file tree changed")
+              require(not git("diff", "--name-status", expected_head, new_head), "Final files changed")
+              require(git("rev-parse", source_ref).decode().strip() == source_before, "Source ref changed during preparation")
+              git("update-ref", review_ref, new_head)
+              require(git("rev-parse", source_ref).decode().strip() == source_before, "Source ref changed")
+              return {
+                  "repository": plan["repository"], "source_ref": source_ref,
+                  "source_head": expected_head, "plan_base_head": plan["expected_head"],
+                  "review_ref": review_ref, "new_head": new_head,
+                  "commit_count": len(order),
+                  "changed_messages": sum(item["message_changed"] for item in review),
+                  "rewritten_commits": sum(item["old_sha"] != item["new_sha"] for item in review),
+                  "invalidated_signatures_removed": sum(bool(item["removed_signature_headers"]) for item in review),
+                  "all_trees_unchanged": True, "all_identities_and_dates_unchanged": True,
+                  "ordered_topology_unchanged": True, "source_ref_unchanged": True,
+                  "carrier_mode": carrier, "commits": review,
+              }
+          
+          
+          def main():
+              parser = argparse.ArgumentParser(description=__doc__)
+              parser.add_argument("--repo", required=True, type=Path)
+              parser.add_argument("--plan", required=True, type=Path)
+              parser.add_argument("--expected-head", required=True)
+              parser.add_argument("--source-ref", default="refs/heads/main")
+              parser.add_argument("--review-ref", default="refs/review/neutral-message-history")
+              parser.add_argument("--report", required=True, type=Path)
+              parser.add_argument("--bundle", type=Path)
+              parser.add_argument("--carrier", action="store_true")
+              args = parser.parse_args()
+              plan = json.loads(args.plan.read_text(encoding="utf-8"))
+              report = prepare(args.repo.resolve(), plan, args.expected_head, args.source_ref, args.review_ref, args.carrier)
+              args.report.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+              if args.bundle:
+                  run_git(args.repo, "bundle", "create", str(args.bundle.resolve()), args.review_ref)
+                  run_git(args.repo, "bundle", "verify", str(args.bundle.resolve()))
+              print(json.dumps({key: value for key, value in report.items() if key != "commits"}, indent=2))
+          
+          
+          
+          import os
+          
+          PLAN = json.loads(r'''{
+            "repository": "jupiter847/jupiter847",
+            "expected_head": "eb1182c561b43d8627815270acfbabfd23e314a7",
+            "messages": [
+              {
+                "old_sha": "1670bc7aab2fe62b99761c5a917f696e4235b293",
+                "old_message": "Updated my profile with selected design work",
+                "new_message": "Updated the profile with selected design work\n"
+              }
+            ]
+          }''')
+          
+          repository = os.environ['GITHUB_REPOSITORY']
+          source_head = os.environ['GITHUB_SHA']
+          require(repository == PLAN['repository'], 'Wrong repository')
+          require(os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch', 'Manual runs only')
+          require(os.environ['GITHUB_REF'] == 'refs/heads/main', 'Main branch only')
+          require(SHA.fullmatch(source_head), 'Invalid workflow commit')
+          workspace = Path(os.environ['RUNNER_TEMP']) / 'neutral-history-work'
+          workspace.mkdir(exist_ok=False)
+          subprocess.run(['git', 'init', '--bare', str(workspace)], check=True, stdout=subprocess.DEVNULL)
+          git = lambda *args: run_git(workspace, *args)
+          git('remote', 'add', 'origin', 'https://github.com/' + repository + '.git')
+          git('fetch', '--no-tags', 'origin', 'refs/heads/main:refs/heads/main')
+          report = prepare(workspace, PLAN, source_head, 'refs/heads/main', 'refs/review/neutral-message-history', carrier=True)
+          (Path(os.environ['RUNNER_TEMP']) / 'neutral-history-report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+          print(json.dumps({key: value for key, value in report.items() if key != 'commits'}, indent=2))
+          PY
+
+      - name: Update only main with an exact lease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import base64, json, os, subprocess
+          from pathlib import Path
+          report = json.loads((Path(os.environ['RUNNER_TEMP']) / 'neutral-history-report.json').read_text())
+          assert report['repository'] == os.environ['GITHUB_REPOSITORY']
+          assert report['source_head'] == os.environ['GITHUB_SHA']
+          assert report['all_trees_unchanged'] and report['all_identities_and_dates_unchanged']
+          assert report['ordered_topology_unchanged'] and report['source_ref_unchanged']
+          repo = Path(os.environ['RUNNER_TEMP']) / 'neutral-history-work'
+          env = os.environ.copy()
+          token = env.pop('GH_TOKEN')
+          assert token, 'Missing repository-scoped token'
+          env['GIT_TERMINAL_PROMPT'] = '0'
+          env['GIT_CONFIG_COUNT'] = '1'
+          env['GIT_CONFIG_KEY_0'] = 'http.https://github.com/.extraheader'
+          env['GIT_CONFIG_VALUE_0'] = 'AUTHORIZATION: basic ' + base64.b64encode(('x-access-token:' + token).encode()).decode()
+          def git(*args):
+              return subprocess.check_output(['git', '--git-dir', str(repo), *args], env=env).decode()
+          expected = report['source_head']
+          target = report['new_head']
+          assert git('ls-remote', '--refs', 'origin', 'refs/heads/main').split()[0] == expected, 'Remote head changed; no push performed'
+          git('push', '--porcelain', '--force-with-lease=refs/heads/main:' + expected, 'origin', target + ':refs/heads/main')
+          assert git('ls-remote', '--refs', 'origin', 'refs/heads/main').split()[0] == target, 'Remote verification failed'
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as stream:
+              stream.write('Updated neutral commit wording.\n\n')
+              stream.write('Previous head: `' + expected + '`\n\n')
+              stream.write('Updated head: `' + target + '`\n\n')
+              stream.write('All file trees, identities, dates and ordered parent relationships verified.\n')
+          PY
