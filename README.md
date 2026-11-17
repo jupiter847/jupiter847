@@ -18,7 +18,7 @@
 
 [![RIFT product experience, presented in a dark technical frame with a monochrome interface preview and its original colour palette](assets/rift-cover.svg)](https://jupiter847.github.io/rift-audio/)
 
-RIFT is my responsive product website for a fictional headphone brand. I focused on a clear journey from inspecting the 3D model to choosing a finish and saving a setup. Wireframe views and labelled details let visitors explore how the product is put together.
+RIFT is a responsive product website for a fictional headphone brand. The journey moves from inspecting the 3D model to choosing a finish and saving a setup. Wireframe views and labelled details let visitors explore how the product is put together.
 
 **UI design · 3D interaction · Product exploration**
 
@@ -30,7 +30,7 @@ RIFT is my responsive product website for a fictional headphone brand. I focused
 
 [![Lumi creative tool, presented in a matching dark technical frame with a monochrome interface preview and its original colour palette](assets/lumi-cover.svg)](https://jupiter847.github.io/lumi-gradient-studio/)
 
-Lumi is my responsive poster studio for people making quote cards, announcements and social posts. I shaped the flow around **write → style → arrange → export**, with a live preview and direct control of the sculptural object. The glass interface and blue and pink palette give the tool its playful identity.
+Lumi is a responsive poster studio for quote cards, announcements and social posts. The flow follows **write → style → arrange → export**, with a live preview and direct control of the sculptural object. The glass interface and blue and pink palette give the tool its playful identity.
 
 **Visual design · Interactive prototyping · Creative tools**
 
@@ -38,8 +38,8 @@ Lumi is my responsive poster studio for people making quote cards, announcements
 
 ---
 
-### What I’m interested in
+### Design focus
 
-These projects bring together interface structure, visual hierarchy and direct interaction. My prototypes use HTML, CSS and JavaScript, with Three.js for RIFT’s 3D views.
+These projects bring together interface structure, visual hierarchy and direct interaction. The prototypes use HTML, CSS and JavaScript, with Three.js for RIFT’s 3D views.
 
 You can find more of my graphic design, motion and UI/UX work in [my portfolio](https://dizainostudija.myportfolio.com/).
